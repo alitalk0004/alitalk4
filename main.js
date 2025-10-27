@@ -483,44 +483,42 @@ async function fetchByCategory({ categoryId }) {
   //  slice(0, Math.round(divided[1].length) / 2 )
   // slice(Math.round(divided[1].length / 2), Math.round(divided[1].length))
 
-  const categoryRes = divided[2]
-    .slice(0, Math.round(divided[1].length) / 2)
-    .map((item) =>
-      limit(async () => {
-        const cat = await ProductCategories.findOne({
-          cId: String(item.cId),
-        });
+  const categoryRes = divided[2].map((item) =>
+    limit(async () => {
+      const cat = await ProductCategories.findOne({
+        cId: String(item.cId),
+      });
 
-        if (!cat?._id) {
-          console.log("카테고리 없음:", item.cId);
-          return;
-        }
+      if (!cat?._id) {
+        console.log("카테고리 없음:", item.cId);
+        return;
+      }
 
-        let res = await ProductDetail.find({ cId1: cat._id })
+      let res = await ProductDetail.find({ cId1: cat._id })
+        .populate("cId1", "cId cn")
+        .populate("cId2", "cId cn")
+        .lean({ virtuals: true });
+
+      if (!res?.length) {
+        res = await ProductDetail.find({ cId2: cat._id })
           .populate("cId1", "cId cn")
           .populate("cId2", "cId cn")
           .lean({ virtuals: true });
+      }
 
-        if (!res?.length) {
-          res = await ProductDetail.find({ cId2: cat._id })
-            .populate("cId1", "cId cn")
-            .populate("cId2", "cId cn")
-            .lean({ virtuals: true });
-        }
+      const { items, raw, serverCount, filteredCount, note } =
+        await fetchByCategory({
+          categoryId: item.cId,
+        });
 
-        const { items, raw, serverCount, filteredCount, note } =
-          await fetchByCategory({
-            categoryId: item.cId,
-          });
+      console.log("cid:", item.cId);
+      console.log("items:", items.length);
+      console.log("res:", res.length);
 
-        console.log("cid:", item.cId);
-        console.log("items:", items.length);
-        console.log("res:", res.length);
-
-        listTasks.item.push(...items);
-        listTasks.dataBaseRes.push(...res);
-      })
-    );
+      listTasks.item.push(...items);
+      listTasks.dataBaseRes.push(...res);
+    })
+  );
 
   await Promise.allSettled(categoryRes, listTasks);
 
