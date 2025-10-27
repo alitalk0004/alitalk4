@@ -459,13 +459,13 @@ async function fetchByCategory({ categoryId }) {
 
   const productCategories = await ProductCategories.find();
   const total = productCategories.length;
-  const baseSize = Math.floor(total / 13); // 기본 크기
-  let remainder = total % 13; // 남는 개수
+  const baseSize = Math.floor(total / 14); // 기본 크기
+  let remainder = total % 14; // 남는 개수
 
   const divided = [];
   let start = 0;
 
-  for (let i = 0; i < 13; i++) {
+  for (let i = 0; i < 14; i++) {
     // 나머지가 남아있으면 이 그룹은 +1개 더 받음
     const extra = remainder > 0 ? 1 : 0;
     const end = start + baseSize + extra;
@@ -480,45 +480,47 @@ async function fetchByCategory({ categoryId }) {
   const listTasks = { item: [], dataBaseRes: [] };
 
   // ---- divided[1]은 2개로 나눠서 배포
-  //  slice(0, Math.round(divided[1].length))
+  //  slice(0, Math.round(divided[1].length) / 2 )
   // slice(Math.round(divided[1].length / 2), Math.round(divided[1].length))
 
-  const categoryRes = divided[2].map((item) =>
-    limit(async () => {
-      const cat = await ProductCategories.findOne({
-        cId: String(item.cId),
-      });
+  const categoryRes = divided[2]
+    .slice(0, Math.round(divided[1].length) / 2)
+    .map((item) =>
+      limit(async () => {
+        const cat = await ProductCategories.findOne({
+          cId: String(item.cId),
+        });
 
-      if (!cat?._id) {
-        console.log("카테고리 없음:", item.cId);
-        return;
-      }
+        if (!cat?._id) {
+          console.log("카테고리 없음:", item.cId);
+          return;
+        }
 
-      let res = await ProductDetail.find({ cId1: cat._id })
-        .populate("cId1", "cId cn")
-        .populate("cId2", "cId cn")
-        .lean({ virtuals: true });
-
-      if (!res?.length) {
-        res = await ProductDetail.find({ cId2: cat._id })
+        let res = await ProductDetail.find({ cId1: cat._id })
           .populate("cId1", "cId cn")
           .populate("cId2", "cId cn")
           .lean({ virtuals: true });
-      }
 
-      const { items, raw, serverCount, filteredCount, note } =
-        await fetchByCategory({
-          categoryId: item.cId,
-        });
+        if (!res?.length) {
+          res = await ProductDetail.find({ cId2: cat._id })
+            .populate("cId1", "cId cn")
+            .populate("cId2", "cId cn")
+            .lean({ virtuals: true });
+        }
 
-      console.log("cid:", item.cId);
-      console.log("items:", items.length);
-      console.log("res:", res.length);
+        const { items, raw, serverCount, filteredCount, note } =
+          await fetchByCategory({
+            categoryId: item.cId,
+          });
 
-      listTasks.item.push(...items);
-      listTasks.dataBaseRes.push(...res);
-    })
-  );
+        console.log("cid:", item.cId);
+        console.log("items:", items.length);
+        console.log("res:", res.length);
+
+        listTasks.item.push(...items);
+        listTasks.dataBaseRes.push(...res);
+      })
+    );
 
   await Promise.allSettled(categoryRes, listTasks);
 
