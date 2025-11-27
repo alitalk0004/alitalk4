@@ -22,6 +22,7 @@ import {
   normalizeSpForCompare,
   stripForCompare,
 } from "./utils/normalize.js";
+import { withRetry } from "./utils/withRetry.js";
 
 const API = "https://api-sg.aliexpress.com/sync";
 const METHOD = "aliexpress.affiliate.product.query";
@@ -228,12 +229,6 @@ const FIELDS = [
 ].join(",");
 
 // ───────────────────────── 재시도 유틸 ─────────────────────────
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-function calcDelay({ base, factor, attempt, jitter, max }) {
-  const backoff = Math.min(base * Math.pow(factor, attempt), max);
-  const rand = 1 + (Math.random() * 2 - 1) * jitter; // 1±jitter
-  return Math.round(backoff * rand);
-}
 
 /**
  * fetch → JSON 파싱까지 포함한 재시도 래퍼
@@ -301,28 +296,28 @@ async function fetchJsonWithRetry(
 /**
  * 임의 함수 재시도(예: getSkuDetail)
  */
-async function withRetry(fn, opts = {}) {
-  const {
-    retries = 3,
-    base = 800,
-    factor = 2,
-    jitter = 0.3,
-    max = 10000,
-  } = opts;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      return await fn();
-    } catch (err) {
-      const code = err?.cause?.code || err?.code;
-      const transient =
-        code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EAI_AGAIN";
-      if (!transient && attempt === 0) throw err; // 비일시적이면 즉시
-      if (attempt === retries) throw err;
-      const delay = calcDelay({ base, factor, attempt, jitter, max });
-      await sleep(delay);
-    }
-  }
-}
+// export async function withRetry(fn, opts = {}) {
+//   const {
+//     retries = 3,
+//     base = 800,
+//     factor = 2,
+//     jitter = 0.3,
+//     max = 10000,
+//   } = opts;
+//   for (let attempt = 0; attempt <= retries; attempt++) {
+//     try {
+//       return await fn();
+//     } catch (err) {
+//       const code = err?.cause?.code || err?.code;
+//       const transient =
+//         code === "ECONNRESET" || code === "ETIMEDOUT" || code === "EAI_AGAIN";
+//       if (!transient && attempt === 0) throw err; // 비일시적이면 즉시
+//       if (attempt === retries) throw err;
+//       const delay = calcDelay({ base, factor, attempt, jitter, max });
+//       await sleep(delay);
+//     }
+//   }
+// }
 
 function signSha256(params, secret) {
   const base = Object.keys(params)
@@ -436,7 +431,7 @@ async function fetchByCategory({ categoryId }) {
     // 종료 조건:
     // - 서버가 더 이상 주지 않음 (0개)
     // - 페이지 크기 미만(마지막 페이지로 추정)
-    if (products.length === 0 && products.length < pageSize) {
+    if (products.length === 0 && products.length < 2) {
       break;
     }
 
@@ -478,20 +473,27 @@ async function fetchByCategory({ categoryId }) {
 
   const listTasks = { item: [], dataBaseRes: [] };
 
-  // ---- divided[1]은 2개로 나눠서 배포
-  //  slice(0, Math.round(divided[1].length / 2))
-  // slice(Math.round(divided[1].length / 2), Math.round(divided[1].length))
+  // ---- divided[1]은 3개로 나눠서 배포
+  //  .slice(0,Math.round(divided[1].length)/3)
+  //  .slice(Math.round(( divided[1].length) / 3),Math.round(2*divided[1].length)/3)
+  //  .slice(Math.round((2 * divided[1].length) / 3),Math.round(divided[1].length))
+
+  // -- 이거 하면 됨 이거 안했음
+  // divided[2]은 2개로 나눠서 배포
+  //  .slice(0, Math.round(divided[2].length / 2))
+  //  .slice(Math.round(divided[2].length / 2), Math.round(divided[2].length ))
+  // -------------
 
   // ---- divided[5]은 3개로 나눠서 배포
-  // slice(0, Math.round(divided[5].length / 3));
-  // slice(
+  // .slice(0, Math.round(divided[5].length / 3));
+  // .slice(
   //   Math.round(divided[5].length / 3),
   //   2 * Math.round(divided[5].length / 3)
   // );
-  // slice(2 * Math.round(divided[5].length / 3), Math.round(divided[5].length));
+  // .slice(2 * Math.round(divided[5].length / 3), Math.round(divided[5].length));
 
   const categoryRes = divided[2]
-    // .slice(Math.round(divided[1].length / 2), Math.round(divided[1].length))
+    .slice(0, Math.round(divided[2].length / 2))
     .map((item) =>
       limit(async () => {
         const cat = await ProductCategories.findOne({
@@ -538,7 +540,7 @@ async function fetchByCategory({ categoryId }) {
   await Promise.allSettled(categoryRes);
 
   // const categoryRes = async () => {
-  //   let res = await ProductDetail.find({ _id: "1005007938045626" })
+  //   let res = await ProductDetail.find({ _id: "1005006900421471" })
   //     .populate("cId1", "cId cn")
   //     .populate("cId2", "cId cn")
   //     .lean({ virtuals: true });
@@ -591,6 +593,9 @@ async function fetchByCategory({ categoryId }) {
       limit(async () => {
         try {
           // 0) 외부 API
+
+          // item._id= ''
+
           const productIds = [item._id];
 
           const skuData = await withRetry(() => getSkuDetail(item._id), {
